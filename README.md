@@ -5,7 +5,16 @@
 [![NuGet](https://img.shields.io/nuget/v/Moonforge.Core.svg)](https://www.nuget.org/packages/Moonforge.Core)
 [![NuGet Downloads](https://img.shields.io/nuget/dt/Moonforge.Core.svg)](https://www.nuget.org/packages/Moonforge.Core)
 
-Moonforge is a deterministic, modular RPG engine for C# projects. It gives you battle, economy, inventory, dialogue, quests, exploration, persistence, and domain-event workflows so you can focus on content instead of rewriting core systems.
+Moonforge is a C# game engine for turn-based RPGs — the kind with parties, stat blocks,
+quest journals, and treasure chests.
+
+It ships the systems every RPG re-invents: combat with status effects and damage types,
+an inventory and economy that survives the player buying things on a full bag, quests
+that track themselves from gameplay events, dialogue trees, loot tables, save/load with
+migrations. All deterministic, all atomic, all wired together so modules don't need to
+know about each other.
+
+Unity-friendly (`netstandard2.1`), MIT-licensed.
 
 ## Why Moonforge
 
