@@ -421,8 +421,19 @@ internal sealed class BattleRuntime
                         legacyDefenseStatId: "mdef", legacyDefenseScalar: target.Mdef);
                 }
 
+                bool wasCritical = false;
                 if (damage > 0)
                 {
+                    if (skill.CritChancePercent > 0)
+                    {
+                        int critRoll = battle.RngState.NextInt(100);
+                        if (critRoll < skill.CritChancePercent)
+                        {
+                            wasCritical = true;
+                            damage = (int)Math.Round(damage * (skill.CritMultiplierPercent / 100.0), MidpointRounding.AwayFromZero);
+                        }
+                    }
+
                     damage = ApplyVariance(battle, damage, skill.DamageVariancePercent);
                     if (damage < 1)
                     {
@@ -438,7 +449,8 @@ internal sealed class BattleRuntime
                     skill.Id,
                     target.ActorId,
                     damage,
-                    wasHeal: false));
+                    wasHeal: false,
+                    wasCritical: wasCritical));
 
                 if (previousHp > 0 && target.Hp == 0)
                 {
@@ -779,6 +791,11 @@ internal sealed class BattleRuntime
                 continue;
             }
 
+            if (IsSkillOnCooldown(actor, rule.SkillId))
+            {
+                continue;
+            }
+
             if (!EvaluateAiConditions(battle, actor, rule.Conditions))
             {
                 continue;
@@ -796,6 +813,7 @@ internal sealed class BattleRuntime
 
         string fallbackSkillId = policy.FallbackSkillId ?? actor.SkillIds.FirstOrDefault() ?? string.Empty;
         if (!string.IsNullOrWhiteSpace(fallbackSkillId)
+            && !IsSkillOnCooldown(actor, fallbackSkillId)
             && TryResolveTargetForPolicy(battle, actor, fallbackSkillId, policy.FallbackTargetPolicy, out string fallbackTarget))
         {
             skillId = fallbackSkillId;
@@ -806,6 +824,11 @@ internal sealed class BattleRuntime
         skillId = string.Empty;
         targetActorId = string.Empty;
         return false;
+    }
+
+    private static bool IsSkillOnCooldown(BattleActorState actor, string skillId)
+    {
+        return actor.Cooldowns.TryGetValue(skillId, out int remaining) && remaining > 0;
     }
 
     private static bool EvaluateAiConditions(

@@ -10,7 +10,8 @@ public sealed class BattleActionResolvedEvent : DomainEvent
         string skillId,
         string targetActorId,
         int amount,
-        bool wasHeal)
+        bool wasHeal,
+        bool wasCritical = false)
         : base(nameof(BattleActionResolvedEvent))
     {
         BattleId = battleId;
@@ -19,6 +20,7 @@ public sealed class BattleActionResolvedEvent : DomainEvent
         TargetActorId = targetActorId;
         Amount = amount;
         WasHeal = wasHeal;
+        WasCritical = wasCritical;
     }
 
     public string BattleId { get; }
@@ -32,4 +34,9 @@ public sealed class BattleActionResolvedEvent : DomainEvent
     public int Amount { get; }
 
     public bool WasHeal { get; }
+
+    /// <summary>
+    /// True when a damage skill rolled a critical hit. Always false for heals.
+    /// </summary>
+    public bool WasCritical { get; }
 }

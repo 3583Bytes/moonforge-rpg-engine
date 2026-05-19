@@ -136,6 +136,10 @@ A `BattleSkillDefinition` can:
 - **Randomize damage / heal**: `damageVariancePercent` (default 0) jitters the rolled
   amount by ± that percent (e.g. 15 → multiplier in `[85, 115]`). Immune targets still
   resolve to zero.
+- **Critical hits**: `critChancePercent` (default 0, damage skills only) and
+  `critMultiplierPercent` (default 200 = 2×) — when a crit lands, the base damage is
+  multiplied before variance jitter and `BattleActionResolvedEvent.WasCritical` is true.
+  Heals never crit.
 - **Cooldown**: `cooldownTurns` blocks re-use for N turns after firing.
 - **Cost resources**: `resourceCosts` consumes from `BattleActorState.Resources` (e.g.
   Focus / Mana).
@@ -200,11 +204,12 @@ Single-target validation rules still apply: trying to heal a full-HP ally with a
 skill fails with `ValidationFailed`. For AoE heal the same condition silently filters the
 ally out instead — the cast still succeeds on whoever's wounded.
 
-### Accuracy and damage variance
+### Accuracy, crits, and damage variance
 
-Both rolls are deterministic from the battle's seeded RNG (`BattleRngState`), so the
-same battle re-runs identically. The order per target is: accuracy first, then damage
-variance, then status-application chances.
+All rolls are deterministic from the battle's seeded RNG (`BattleRngState`), so the
+same battle re-runs identically. The order per target is: **accuracy → crit → variance →
+status applications**. A miss skips all of the remaining rolls. An immune target
+(resistance ≥ 100) resolves to 0 damage without consuming the crit or variance rolls.
 
 ```csharp
 // 80% chance to land; on a miss, BattleActionMissedEvent fires and the effect is
@@ -225,10 +230,19 @@ new BattleSkillDefinition(
     BattleSkillEffectType.PhysicalDamage,
     power: 12,
     damageVariancePercent: 20);
+
+// 15% chance to crit for 2× damage. The crit roll happens after accuracy and before
+// variance; the resolved event's WasCritical flag is true when it lands.
+new BattleSkillDefinition(
+    "skill.precise_strike",
+    BattleSkillEffectType.PhysicalDamage,
+    power: 9,
+    critChancePercent: 15,
+    critMultiplierPercent: 200);
 ```
 
-Immunity (resistance ≥ 100) wins over variance: an immune target still resolves to 0
-damage, never the floored 1.
+Immunity (resistance ≥ 100) wins over crit and variance: an immune target still resolves
+to 0 damage, never the floored 1.
 
 ## Damage types and resistances
 
@@ -355,7 +369,7 @@ Skills with `resourceCosts` consume on use; insufficient resources fail the comm
 |---|---|
 | `BattleStartedEvent` | Open the battle screen, animate intro |
 | `BattleTurnAdvancedEvent` | Highlight the new active actor |
-| `BattleActionResolvedEvent` | Floating damage text, hit FX (`Amount = 0` means immune) |
+| `BattleActionResolvedEvent` | Floating damage text, hit FX (`Amount = 0` means immune, `WasCritical = true` triggers crit FX) |
 | `BattleActionMissedEvent` | Show "Miss!" floater; suppress damage / status FX |
 | `StatusAppliedEvent` / `StatusExpiredEvent` | Show / hide status icons |
 | `StatusTickedEvent` | DOT tick FX |

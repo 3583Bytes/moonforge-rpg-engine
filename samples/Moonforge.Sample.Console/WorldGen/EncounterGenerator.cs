@@ -154,12 +154,13 @@ internal static class EncounterGenerator
         BossTemplate boss = ResolveBossTemplate(depth);
         List<BattleSkillDefinition> skills = BuildCommonSkills();
         // Slam is the boss's reliable melee hit — slightly randomized so consecutive
-        // turns don't feel mechanical.
+        // turns don't feel mechanical, with a small crit chance for the occasional spike.
         skills.Add(new BattleSkillDefinition(
             "skill.boss.slam",
             BattleSkillEffectType.PhysicalDamage,
             power: 12,
-            damageVariancePercent: 12));
+            damageVariancePercent: 12,
+            critChancePercent: 10));
 
         // Nova is the boss's elemental signature: fire-typed AoE that fans across every
         // party member. The roguelike currently runs a one-hero party so the cast still
@@ -175,6 +176,36 @@ internal static class EncounterGenerator
             targetMode: BattleSkillTargetMode.AllEnemies,
             accuracyPercent: 90,
             damageVariancePercent: 18));
+
+        // Wreath of Flame is a self-buff: no damage, just applies a +matk status to the
+        // boss for several turns so subsequent Novas hit harder. Cooldown 5 keeps it
+        // from spamming — the AI re-casts it after the buff has expired.
+        skills.Add(new BattleSkillDefinition(
+            "skill.boss.wreath",
+            BattleSkillEffectType.Buff,
+            power: 0,
+            cooldownTurns: 5,
+            displayName: "Wreath of Flame",
+            targetMode: BattleSkillTargetMode.Self,
+            appliesStatuses:
+            [
+                new StatusApplicationDefinition("status.wreath_of_flame", StatusApplicationTarget.Self, chancePercent: 100)
+            ]));
+
+        // Cinderbrand is the debuff counterpart: single-target, applies a defense-down
+        // status to the chosen enemy so subsequent Slams hit harder. Cooldown 4 keeps
+        // the boss from spamming it.
+        skills.Add(new BattleSkillDefinition(
+            "skill.boss.cinderbrand",
+            BattleSkillEffectType.Debuff,
+            power: 0,
+            cooldownTurns: 4,
+            displayName: "Cinderbrand",
+            targetMode: BattleSkillTargetMode.Single,
+            appliesStatuses:
+            [
+                new StatusApplicationDefinition("status.cinderbrand", StatusApplicationTarget.Target, chancePercent: 100)
+            ]));
 
         BattleActorDefinition bossActor = CreateBossEnemy(boss, depth, battleSequence);
         List<BattleActorDefinition> actors =
@@ -236,7 +267,13 @@ internal static class EncounterGenerator
     {
         return
         [
-            new BattleSkillDefinition("skill.attack", BattleSkillEffectType.PhysicalDamage, power: 8),
+            // 15% crit chance on the basic attack — visible enough to see a few crits
+            // per dungeon run without making damage feel swingy.
+            new BattleSkillDefinition(
+                "skill.attack",
+                BattleSkillEffectType.PhysicalDamage,
+                power: 8,
+                critChancePercent: 15),
             new BattleSkillDefinition("skill.potion", BattleSkillEffectType.Heal, power: 10),
             new BattleSkillDefinition("skill.claw", BattleSkillEffectType.PhysicalDamage, power: 5),
             new BattleSkillDefinition("skill.bolt", BattleSkillEffectType.MagicalDamage, power: 6),
@@ -553,7 +590,7 @@ internal static class EncounterGenerator
             matk: matk,
             mdef: mdef,
             initiative: initiative,
-            skillIds: ["skill.boss.slam", "skill.boss.nova", "skill.heal"],
+            skillIds: ["skill.boss.slam", "skill.boss.nova", "skill.boss.wreath", "skill.boss.cinderbrand", "skill.heal"],
             playerControlled: false,
             aiPolicy: BuildBossAi(),
             xpReward: 30 + (depth * 8));
@@ -569,6 +606,16 @@ internal static class EncounterGenerator
                     priorityWeight: 120,
                     targetPolicy: BattleAiTargetPolicy.Self,
                     conditions: [new BattleAiConditionDefinition(BattleAiConditionType.SelfHpBelowPercent, 40)]),
+                new BattleAiRuleDefinition(
+                    skillId: "skill.boss.wreath",
+                    priorityWeight: 100,
+                    targetPolicy: BattleAiTargetPolicy.Self,
+                    conditions: []),
+                new BattleAiRuleDefinition(
+                    skillId: "skill.boss.cinderbrand",
+                    priorityWeight: 95,
+                    targetPolicy: BattleAiTargetPolicy.HighestThreatEnemy,
+                    conditions: []),
                 new BattleAiRuleDefinition(
                     skillId: "skill.boss.nova",
                     priorityWeight: 90,

@@ -463,6 +463,18 @@ internal sealed class RoguelikeGame
                 tickHpDelta: -2,
                 displayName: "Poison",
                 description: "Loses 2 HP at the start of each turn for 3 turns."))
+            .AddStatusEffect(new StatusEffectDefinition(
+                id: "status.wreath_of_flame",
+                durationTurns: 4,
+                statModifiers: new Dictionary<string, int> { ["matk"] = 5 },
+                displayName: "Wreath of Flame",
+                description: "Magical attack power is significantly increased."))
+            .AddStatusEffect(new StatusEffectDefinition(
+                id: "status.cinderbrand",
+                durationTurns: 3,
+                statModifiers: new Dictionary<string, int> { ["def"] = -3 },
+                displayName: "Cinderbrand",
+                description: "Smoldering brand on the skin. Physical defense is reduced."))
             .AddExperienceCurve(new ExperienceCurveDefinition(
                 id: HeroCurveId,
                 xpThresholds: new long[] { 20, 60, 120, 200, 320, 480, 700, 1000, 1400, 1900 },
@@ -3230,6 +3242,11 @@ internal sealed class RoguelikeGame
                         actionText = $"{ResolveDisplayName(action.TargetActorId)} is immune to {ResolveSkillName(action.SkillId)}!";
                         actionKind = BattleLogKind.Info;
                     }
+                    else if (action.WasCritical)
+                    {
+                        actionText = $"{ResolveDisplayName(action.ActorId)} lands a critical hit on {ResolveDisplayName(action.TargetActorId)} for {action.Amount}!";
+                        actionKind = BattleLogKind.Damage;
+                    }
                     else
                     {
                         actionText = $"{ResolveDisplayName(action.ActorId)} hits {ResolveDisplayName(action.TargetActorId)} for {action.Amount}.";
@@ -3272,8 +3289,11 @@ internal sealed class RoguelikeGame
                     {
                         string actorName = ResolveDisplayName(statusApplied.ActorId);
                         string statusLabel = ResolveStatusLabel(statusApplied.StatusId);
-                        string msg = $"{actorName} is afflicted with {statusLabel}.";
-                        SetMessage(msg, MessageTone.Warning);
+                        bool selfApplied = string.Equals(statusApplied.SourceActorId, statusApplied.ActorId, StringComparison.Ordinal);
+                        string msg = selfApplied
+                            ? $"{actorName} draws on {statusLabel}."
+                            : $"{actorName} is afflicted with {statusLabel}.";
+                        SetMessage(msg, selfApplied ? MessageTone.Info : MessageTone.Warning);
                         PushBattleLog(msg, BattleLogKind.Info);
                     }
                     break;

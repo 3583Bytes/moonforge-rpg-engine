@@ -23,7 +23,9 @@ public sealed class BattleSkillDefinition
         string? damageTypeId = null,
         BattleSkillTargetMode targetMode = BattleSkillTargetMode.Single,
         int accuracyPercent = 100,
-        int damageVariancePercent = 0)
+        int damageVariancePercent = 0,
+        int critChancePercent = 0,
+        int critMultiplierPercent = 200)
     {
         Id = id;
         EffectType = effectType;
@@ -37,6 +39,8 @@ public sealed class BattleSkillDefinition
         TargetMode = targetMode;
         AccuracyPercent = accuracyPercent < 0 ? 0 : (accuracyPercent > 100 ? 100 : accuracyPercent);
         DamageVariancePercent = damageVariancePercent < 0 ? 0 : (damageVariancePercent > 100 ? 100 : damageVariancePercent);
+        CritChancePercent = critChancePercent < 0 ? 0 : (critChancePercent > 100 ? 100 : critChancePercent);
+        CritMultiplierPercent = critMultiplierPercent < 100 ? 100 : critMultiplierPercent;
     }
 
     public string Id { get; }
@@ -83,6 +87,19 @@ public sealed class BattleSkillDefinition
     /// </summary>
     public int DamageVariancePercent { get; }
 
+    /// <summary>
+    /// Probability (0–100) of a critical hit on damage skills. 0 disables crits.
+    /// Heals never crit even when this is non-zero. Rolled once per target.
+    /// </summary>
+    public int CritChancePercent { get; }
+
+    /// <summary>
+    /// Damage multiplier applied on a critical hit, expressed as percent
+    /// (200 = 2× damage, the default). Clamped to a minimum of 100. Applied to
+    /// the base damage before variance jitter.
+    /// </summary>
+    public int CritMultiplierPercent { get; }
+
     public BattleSkillDefinition Clone()
     {
         Dictionary<string, int> costs = new(ResourceCosts.Count, StringComparer.Ordinal);
@@ -103,6 +120,8 @@ public sealed class BattleSkillDefinition
             DamageTypeId,
             TargetMode,
             AccuracyPercent,
-            DamageVariancePercent);
+            DamageVariancePercent,
+            CritChancePercent,
+            CritMultiplierPercent);
     }
 }

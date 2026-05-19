@@ -265,6 +265,214 @@ public sealed class CombatTargetingAndRollsTests
         Assert.Contains(sink.Events, e => e is StatusAppliedEvent s && s.ActorId == "enemy.goblin" && s.StatusId == "status.slow");
     }
 
+    [Fact]
+    public void Crit_Chance_100_Always_Crits_And_Multiplies_Damage()
+    {
+        int noCritDamage = RunSingleHit(critChance: 0, critMultiplier: 200, out _);
+        int alwaysCritDamage = RunSingleHit(critChance: 100, critMultiplier: 200, out BattleActionResolvedEvent critEvent);
+
+        Assert.True(critEvent.WasCritical);
+        // 2× multiplier should at least roughly double the deterministic baseline.
+        // (No variance configured, so the only difference is the crit multiplier.)
+        Assert.Equal(noCritDamage * 2, alwaysCritDamage);
+    }
+
+    [Fact]
+    public void Crit_Chance_0_Never_Crits()
+    {
+        RunSingleHit(critChance: 0, critMultiplier: 200, out BattleActionResolvedEvent ev);
+        Assert.False(ev.WasCritical);
+    }
+
+    [Fact]
+    public void Heal_Never_Crits_Even_With_High_Crit_Chance()
+    {
+        GameState gameState = new();
+        InMemoryDomainEventSink sink = new();
+        CommandDispatcher dispatcher = CreateDispatcher();
+
+        BattleSkillDefinition healCrit = new(
+            "skill.miraculous",
+            BattleSkillEffectType.Heal,
+            power: 8,
+            critChancePercent: 100);
+
+        Assert.True(dispatcher.Dispatch(
+            gameState,
+            BuildBattle(heroSkills: ["skill.miraculous"], extraSkills: [healCrit]),
+            CreateContext(sink)).IsSuccess);
+
+        gameState.ActiveBattle!.Actors["party.hero"].Hp = 5;
+
+        Assert.True(dispatcher.Dispatch(
+            gameState,
+            new UseBattleSkillCommand("party.hero", "skill.miraculous", "party.hero"),
+            CreateContext(sink)).IsSuccess);
+
+        BattleActionResolvedEvent heal = sink.Events
+            .OfType<BattleActionResolvedEvent>()
+            .Single(e => e.SkillId == "skill.miraculous");
+
+        Assert.True(heal.WasHeal);
+        Assert.False(heal.WasCritical);
+    }
+
+    [Fact]
+    public void Crit_Does_Not_Bypass_Immunity()
+    {
+        GameState gameState = new();
+        InMemoryDomainEventSink sink = new();
+        CommandDispatcher dispatcher = CreateDispatcher();
+
+        InMemoryGameDefinitionCatalog defs = new InMemoryGameDefinitionCatalog()
+            .AddCurrency(new CurrencyDefinition("currency.gold", 999))
+            .AddDamageType(new DamageTypeDefinition(
+                "damage.frost",
+                attackStatId: "matk",
+                flatDefenseStatId: null,
+                resistanceStatId: "res.frost"));
+
+        BattleSkillDefinition icicle = new(
+            "skill.icicle",
+            BattleSkillEffectType.MagicalDamage,
+            power: 99,
+            damageTypeId: "damage.frost",
+            critChancePercent: 100);
+
+        Assert.True(dispatcher.Dispatch(
+            gameState,
+            BuildBattle(heroSkills: ["skill.icicle"], extraSkills: [icicle]),
+            CreateContext(sink, defs)).IsSuccess);
+
+        // Make the goblin frost-immune.
+        gameState.ActorStatsState.GetOrCreate("enemy.goblin").SetBase("res.frost", 100);
+
+        Assert.True(dispatcher.Dispatch(
+            gameState,
+            new UseBattleSkillCommand("party.hero", "skill.icicle", "enemy.goblin"),
+            CreateContext(sink, defs)).IsSuccess);
+
+        BattleActionResolvedEvent hit = sink.Events
+            .OfType<BattleActionResolvedEvent>()
+            .Single(e => e.SkillId == "skill.icicle");
+
+        Assert.Equal(0, hit.Amount);
+        Assert.False(hit.WasCritical); // immune target → crit roll skipped (no damage to multiply)
+    }
+
+    [Fact]
+    public void Ai_Skips_Skill_That_Is_Currently_On_Cooldown()
+    {
+        GameState gameState = new();
+        InMemoryDomainEventSink sink = new();
+        CommandDispatcher dispatcher = CreateDispatcher();
+
+        // Bite has a 3-turn cooldown; Tackle is the always-available fallback.
+        BattleSkillDefinition bite = new(
+            "skill.bite",
+            BattleSkillEffectType.PhysicalDamage,
+            power: 20,
+            cooldownTurns: 3);
+        BattleSkillDefinition tackle = new(
+            "skill.tackle",
+            BattleSkillEffectType.PhysicalDamage,
+            power: 3);
+
+        BattleAiPolicyDefinition wolfAi = new(
+            rules:
+            [
+                new BattleAiRuleDefinition(
+                    skillId: "skill.bite",
+                    priorityWeight: 100,
+                    targetPolicy: BattleAiTargetPolicy.LowestHpEnemy,
+                    conditions: [])
+            ],
+            fallbackSkillId: "skill.tackle",
+            fallbackTargetPolicy: BattleAiTargetPolicy.LowestHpEnemy);
+
+        List<BattleActorDefinition> actors =
+        [
+            new BattleActorDefinition(
+                actorId: "party.hero",
+                displayName: "Hero",
+                faction: CombatFaction.Party,
+                maxHp: 100,
+                atk: 5,
+                def: 0,
+                matk: 0,
+                mdef: 0,
+                initiative: 5,
+                skillIds: ["skill.tackle"],
+                playerControlled: true),
+            new BattleActorDefinition(
+                actorId: "enemy.wolf",
+                displayName: "Wolf",
+                faction: CombatFaction.Enemy,
+                maxHp: 100,
+                atk: 0,
+                def: 0,
+                matk: 0,
+                mdef: 0,
+                initiative: 20,
+                skillIds: ["skill.bite", "skill.tackle"],
+                playerControlled: false,
+                aiPolicy: wolfAi)
+        ];
+
+        Assert.True(dispatcher.Dispatch(
+            gameState,
+            new StartBattleCommand("battle.cd", actors, [bite, tackle], seed: 1, sequence: 1),
+            CreateContext(sink)).IsSuccess);
+
+        // Wolf goes first (higher initiative). Cast 1: should pick Bite.
+        Assert.True(dispatcher.Dispatch(gameState, new ExecuteAiTurnCommand(), CreateContext(sink)).IsSuccess);
+
+        // Hero burns a turn so the wolf comes up again.
+        Assert.True(dispatcher.Dispatch(
+            gameState,
+            new UseBattleSkillCommand("party.hero", "skill.tackle", "enemy.wolf"),
+            CreateContext(sink)).IsSuccess);
+
+        // Cast 2: Bite is on cooldown — must fall through to Tackle without erroring.
+        Assert.True(dispatcher.Dispatch(gameState, new ExecuteAiTurnCommand(), CreateContext(sink)).IsSuccess);
+
+        List<BattleActionResolvedEvent> wolfHits = sink.Events
+            .OfType<BattleActionResolvedEvent>()
+            .Where(e => e.ActorId == "enemy.wolf")
+            .ToList();
+
+        Assert.Equal(2, wolfHits.Count);
+        Assert.Equal("skill.bite", wolfHits[0].SkillId);
+        Assert.Equal("skill.tackle", wolfHits[1].SkillId);
+    }
+
+    private static int RunSingleHit(int critChance, int critMultiplier, out BattleActionResolvedEvent hit)
+    {
+        GameState gameState = new();
+        InMemoryDomainEventSink sink = new();
+        CommandDispatcher dispatcher = CreateDispatcher();
+
+        BattleSkillDefinition strike = new(
+            "skill.crit_test",
+            BattleSkillEffectType.PhysicalDamage,
+            power: 10,
+            critChancePercent: critChance,
+            critMultiplierPercent: critMultiplier);
+
+        Assert.True(dispatcher.Dispatch(
+            gameState,
+            BuildBattle(heroSkills: ["skill.crit_test"], extraSkills: [strike]),
+            CreateContext(sink)).IsSuccess);
+
+        Assert.True(dispatcher.Dispatch(
+            gameState,
+            new UseBattleSkillCommand("party.hero", "skill.crit_test", "enemy.goblin"),
+            CreateContext(sink)).IsSuccess);
+
+        hit = sink.Events.OfType<BattleActionResolvedEvent>().Single(e => e.SkillId == "skill.crit_test");
+        return hit.Amount;
+    }
+
     private static int RunSingleHitWithVariance(ulong seed, int variancePercent)
     {
         GameState gameState = new();
