@@ -153,14 +153,28 @@ internal static class EncounterGenerator
     {
         BossTemplate boss = ResolveBossTemplate(depth);
         List<BattleSkillDefinition> skills = BuildCommonSkills();
-        skills.Add(new BattleSkillDefinition("skill.boss.slam", BattleSkillEffectType.PhysicalDamage, power: 12));
-        // Nova is the boss's elemental signature — fire-typed so resistance/immunity applies.
+        // Slam is the boss's reliable melee hit — slightly randomized so consecutive
+        // turns don't feel mechanical.
+        skills.Add(new BattleSkillDefinition(
+            "skill.boss.slam",
+            BattleSkillEffectType.PhysicalDamage,
+            power: 12,
+            damageVariancePercent: 12));
+
+        // Nova is the boss's elemental signature: fire-typed AoE that fans across every
+        // party member. The roguelike currently runs a one-hero party so the cast still
+        // resolves on a single actor, but the skill is configured AoE so a future
+        // multi-character party (companions, summons) gets the full sweep automatically.
+        // 90% accuracy + 18% variance give it the "big telegraphed spell" feel.
         skills.Add(new BattleSkillDefinition(
             "skill.boss.nova",
             BattleSkillEffectType.MagicalDamage,
-            power: 11,
+            power: 8,
             displayName: "Fire Nova",
-            damageTypeId: StandardDamageTypes.Fire));
+            damageTypeId: StandardDamageTypes.Fire,
+            targetMode: BattleSkillTargetMode.AllEnemies,
+            accuracyPercent: 90,
+            damageVariancePercent: 18));
 
         BattleActorDefinition bossActor = CreateBossEnemy(boss, depth, battleSequence);
         List<BattleActorDefinition> actors =

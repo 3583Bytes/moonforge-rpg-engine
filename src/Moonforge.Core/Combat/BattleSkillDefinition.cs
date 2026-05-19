@@ -20,7 +20,10 @@ public sealed class BattleSkillDefinition
         string? displayName = null,
         string? description = null,
         IReadOnlyList<StatusApplicationDefinition>? appliesStatuses = null,
-        string? damageTypeId = null)
+        string? damageTypeId = null,
+        BattleSkillTargetMode targetMode = BattleSkillTargetMode.Single,
+        int accuracyPercent = 100,
+        int damageVariancePercent = 0)
     {
         Id = id;
         EffectType = effectType;
@@ -31,6 +34,9 @@ public sealed class BattleSkillDefinition
         Description = description;
         AppliesStatuses = appliesStatuses ?? EmptyApplications;
         DamageTypeId = string.IsNullOrWhiteSpace(damageTypeId) ? null : damageTypeId;
+        TargetMode = targetMode;
+        AccuracyPercent = accuracyPercent < 0 ? 0 : (accuracyPercent > 100 ? 100 : accuracyPercent);
+        DamageVariancePercent = damageVariancePercent < 0 ? 0 : (damageVariancePercent > 100 ? 100 : damageVariancePercent);
     }
 
     public string Id { get; }
@@ -56,6 +62,27 @@ public sealed class BattleSkillDefinition
     /// </summary>
     public string? DamageTypeId { get; }
 
+    /// <summary>
+    /// How the skill resolves targets. <see cref="BattleSkillTargetMode.Single"/> (default)
+    /// uses the explicit target supplied with the command; the other modes fan the effect
+    /// out across multiple actors and the command's target is ignored.
+    /// </summary>
+    public BattleSkillTargetMode TargetMode { get; }
+
+    /// <summary>
+    /// Probability (0–100) that the skill lands on a given target. 100 means it never
+    /// misses. Rolled once per target; on a miss the skill's effect is skipped and a
+    /// <see cref="Events.BattleActionMissedEvent"/> is published.
+    /// </summary>
+    public int AccuracyPercent { get; }
+
+    /// <summary>
+    /// Per-skill damage/heal randomization range, expressed as ± percent. 0 means
+    /// deterministic damage. 15 means each hit is rolled in [85%, 115%] of the base
+    /// resolved amount. Rolled once per target.
+    /// </summary>
+    public int DamageVariancePercent { get; }
+
     public BattleSkillDefinition Clone()
     {
         Dictionary<string, int> costs = new(ResourceCosts.Count, StringComparer.Ordinal);
@@ -64,6 +91,18 @@ public sealed class BattleSkillDefinition
             costs[pair.Key] = pair.Value;
         }
 
-        return new BattleSkillDefinition(Id, EffectType, Power, CooldownTurns, costs, DisplayName, Description, AppliesStatuses, DamageTypeId);
+        return new BattleSkillDefinition(
+            Id,
+            EffectType,
+            Power,
+            CooldownTurns,
+            costs,
+            DisplayName,
+            Description,
+            AppliesStatuses,
+            DamageTypeId,
+            TargetMode,
+            AccuracyPercent,
+            DamageVariancePercent);
     }
 }

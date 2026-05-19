@@ -125,6 +125,17 @@ A `BattleSkillDefinition` can:
 - **Deal damage**: `BattleSkillEffectType.PhysicalDamage` (uses `atk`/`def` by default) or
   `MagicalDamage` (uses `matk`/`mdef`).
 - **Heal**: `BattleSkillEffectType.Heal` (uses `matk` as the healing scalar).
+- **Apply only**: `BattleSkillEffectType.Buff` (ally-targeted, no HP change) or
+  `Debuff` (enemy-targeted, no HP change). Effect is carried entirely through
+  `appliesStatuses`.
+- **Hit multiple targets**: `targetMode` controls fan-out — `Single` (default, uses the
+  caller-supplied target), `Self`, `AllAllies`, `AllEnemies`, `AllOthers`. For non-`Single`
+  modes the command's target id is ignored.
+- **Miss**: `accuracyPercent` (default 100) is rolled per target. On a miss the effect is
+  skipped for that target and a `BattleActionMissedEvent` fires.
+- **Randomize damage / heal**: `damageVariancePercent` (default 0) jitters the rolled
+  amount by ± that percent (e.g. 15 → multiplier in `[85, 115]`). Immune targets still
+  resolve to zero.
 - **Cooldown**: `cooldownTurns` blocks re-use for N turns after firing.
 - **Cost resources**: `resourceCosts` consumes from `BattleActorState.Resources` (e.g.
   Focus / Mana).
@@ -147,6 +158,77 @@ new BattleSkillDefinition(
     ],
     damageTypeId: StandardDamageTypes.Fire);
 ```
+
+### Multi-target skills
+
+`targetMode` controls how the engine resolves who the skill hits. For `Single` (default),
+the caller passes the explicit target id with `UseBattleSkillCommand`. For every other
+mode, the command's `targetActorId` is ignored and the engine fans the effect across the
+matching actors in turn-order — one roll set per target.
+
+```csharp
+// Fire Nova: every enemy takes a Fire-typed magical hit, with some variance.
+new BattleSkillDefinition(
+    "skill.fire_nova",
+    BattleSkillEffectType.MagicalDamage,
+    power: 9,
+    displayName: "Fire Nova",
+    targetMode: BattleSkillTargetMode.AllEnemies,
+    damageTypeId: StandardDamageTypes.Fire,
+    damageVariancePercent: 15);
+
+// Group heal: heals every living ally; full-HP allies are skipped silently.
+new BattleSkillDefinition(
+    "skill.mass_cure",
+    BattleSkillEffectType.Heal,
+    power: 10,
+    targetMode: BattleSkillTargetMode.AllAllies);
+
+// Self-buff: applies Bulwark to the caster.
+new BattleSkillDefinition(
+    "skill.bulwark",
+    BattleSkillEffectType.Buff,
+    power: 0,
+    targetMode: BattleSkillTargetMode.Self,
+    appliesStatuses:
+    [
+        new StatusApplicationDefinition("status.bulwark", StatusApplicationTarget.Self)
+    ]);
+```
+
+Single-target validation rules still apply: trying to heal a full-HP ally with a `Single`
+skill fails with `ValidationFailed`. For AoE heal the same condition silently filters the
+ally out instead — the cast still succeeds on whoever's wounded.
+
+### Accuracy and damage variance
+
+Both rolls are deterministic from the battle's seeded RNG (`BattleRngState`), so the
+same battle re-runs identically. The order per target is: accuracy first, then damage
+variance, then status-application chances.
+
+```csharp
+// 80% chance to land; on a miss, BattleActionMissedEvent fires and the effect is
+// skipped (no damage, no status applications).
+new BattleSkillDefinition(
+    "skill.hypnosis",
+    BattleSkillEffectType.Debuff,
+    power: 0,
+    accuracyPercent: 80,
+    appliesStatuses:
+    [
+        new StatusApplicationDefinition("status.sleep", chancePercent: 100)
+    ]);
+
+// ±20% damage roll — same seed reproduces the same number.
+new BattleSkillDefinition(
+    "skill.wild_swing",
+    BattleSkillEffectType.PhysicalDamage,
+    power: 12,
+    damageVariancePercent: 20);
+```
+
+Immunity (resistance ≥ 100) wins over variance: an immune target still resolves to 0
+damage, never the floored 1.
 
 ## Damage types and resistances
 
@@ -274,6 +356,7 @@ Skills with `resourceCosts` consume on use; insufficient resources fail the comm
 | `BattleStartedEvent` | Open the battle screen, animate intro |
 | `BattleTurnAdvancedEvent` | Highlight the new active actor |
 | `BattleActionResolvedEvent` | Floating damage text, hit FX (`Amount = 0` means immune) |
+| `BattleActionMissedEvent` | Show "Miss!" floater; suppress damage / status FX |
 | `StatusAppliedEvent` / `StatusExpiredEvent` | Show / hide status icons |
 | `StatusTickedEvent` | DOT tick FX |
 | `BattleEndedEvent` | Close battle screen, show rewards |

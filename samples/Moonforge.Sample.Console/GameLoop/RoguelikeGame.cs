@@ -3239,6 +3239,13 @@ internal sealed class RoguelikeGame
                     SetMessage(actionText, actionKind == BattleLogKind.Heal ? MessageTone.Success : MessageTone.Info);
                     PushBattleLog(actionText, actionKind);
                     break;
+                case BattleActionMissedEvent missed:
+                    {
+                        string missText = $"{ResolveDisplayName(missed.ActorId)}'s {ResolveSkillName(missed.SkillId)} misses {ResolveDisplayName(missed.TargetActorId)}.";
+                        SetMessage(missText, MessageTone.Warning);
+                        PushBattleLog(missText, BattleLogKind.Info);
+                    }
+                    break;
                 case BattleEndedEvent ended:
                     _lastBattleStatus = ended.Status;
                     bool victory = ended.Status == BattleStatus.Victory;

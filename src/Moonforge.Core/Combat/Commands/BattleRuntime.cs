@@ -252,78 +252,223 @@ internal sealed class BattleRuntime
             }
         }
 
-        if (!battle.TryGetActor(targetActorId, out BattleActorState target))
+        List<BattleActorState> targets = ResolveTargets(battle, actor, skill, targetActorId, out DomainError? targetError);
+        if (targetError is not null)
         {
-            return DomainResult.Fail(new DomainError(DomainErrorCode.NotFound, $"Target actor '{targetActorId}' not found."));
+            return DomainResult.Fail(targetError);
         }
 
-        if (!IsValidTarget(actor, target, skill))
+        if (targets.Count == 0)
         {
             return DomainResult.Fail(new DomainError(
                 DomainErrorCode.ValidationFailed,
-                $"Target '{targetActorId}' is invalid for skill '{skillId}'."));
+                $"Skill '{skillId}' has no valid targets."));
         }
 
-        if (skill.EffectType == BattleSkillEffectType.Heal)
+        foreach (BattleActorState target in targets)
         {
-            int healAmount = Math.Max(1, GetEffectiveStat(gameState, actor, "matk", actor.Matk, context) + skill.Power);
-            int maxHp = GetEffectiveStat(gameState, target, "maxhp", target.MaxHp, context);
-            int previous = target.Hp;
-            int next = Math.Min(maxHp, previous + healAmount);
-            target.Hp = next;
-            context.EventSink.Publish(new BattleActionResolvedEvent(
-                battle.BattleId,
-                actorId,
-                skillId,
-                targetActorId,
-                next - previous,
-                wasHeal: true));
-            ApplyStatusApplicationsAfterSkill(gameState, battle, actor, target, skill, context);
-            ConsumeSkillCosts(actor, skill);
-            return DomainResult.Success();
+            ApplySkillToTarget(gameState, battle, actor, target, skill, context);
         }
 
-        int damage;
+        ConsumeSkillCosts(actor, skill);
+        return DomainResult.Success();
+    }
+
+    private static List<BattleActorState> ResolveTargets(
+        BattleState battle,
+        BattleActorState actor,
+        BattleSkillDefinition skill,
+        string explicitTargetId,
+        out DomainError? error)
+    {
+        error = null;
+        List<BattleActorState> results = new();
+
+        switch (skill.TargetMode)
+        {
+            case BattleSkillTargetMode.Single:
+            {
+                if (!battle.TryGetActor(explicitTargetId, out BattleActorState target))
+                {
+                    error = new DomainError(DomainErrorCode.NotFound, $"Target actor '{explicitTargetId}' not found.");
+                    return results;
+                }
+
+                if (!IsValidTarget(actor, target, skill))
+                {
+                    error = new DomainError(
+                        DomainErrorCode.ValidationFailed,
+                        $"Target '{explicitTargetId}' is invalid for skill '{skill.Id}'.");
+                    return results;
+                }
+
+                results.Add(target);
+                return results;
+            }
+
+            case BattleSkillTargetMode.Self:
+            {
+                if (IsValidTarget(actor, actor, skill))
+                {
+                    results.Add(actor);
+                }
+
+                return results;
+            }
+
+            case BattleSkillTargetMode.AllAllies:
+            case BattleSkillTargetMode.AllEnemies:
+            case BattleSkillTargetMode.AllOthers:
+            {
+                List<BattleActorState> ordered = battle.TurnOrder
+                    .Select(id => battle.Actors[id])
+                    .ToList();
+
+                foreach (BattleActorState candidate in ordered)
+                {
+                    bool matches = skill.TargetMode switch
+                    {
+                        BattleSkillTargetMode.AllAllies => candidate.Faction == actor.Faction,
+                        BattleSkillTargetMode.AllEnemies => candidate.Faction != actor.Faction,
+                        BattleSkillTargetMode.AllOthers => candidate.ActorId != actor.ActorId,
+                        _ => false
+                    };
+
+                    if (!matches)
+                    {
+                        continue;
+                    }
+
+                    if (!IsValidTarget(actor, candidate, skill))
+                    {
+                        continue;
+                    }
+
+                    results.Add(candidate);
+                }
+
+                return results;
+            }
+
+            default:
+                error = new DomainError(
+                    DomainErrorCode.UnsupportedOperation,
+                    $"Unsupported target mode '{skill.TargetMode}'.");
+                return results;
+        }
+    }
+
+    private static void ApplySkillToTarget(
+        GameState gameState,
+        BattleState battle,
+        BattleActorState actor,
+        BattleActorState target,
+        BattleSkillDefinition skill,
+        CommandContext context)
+    {
+        if (skill.AccuracyPercent < 100)
+        {
+            int accuracyRoll = battle.RngState.NextInt(100);
+            if (accuracyRoll >= skill.AccuracyPercent)
+            {
+                context.EventSink.Publish(new BattleActionMissedEvent(
+                    battle.BattleId,
+                    actor.ActorId,
+                    skill.Id,
+                    target.ActorId));
+                return;
+            }
+        }
+
         switch (skill.EffectType)
         {
+            case BattleSkillEffectType.Heal:
+            {
+                int healAmount = Math.Max(1, GetEffectiveStat(gameState, actor, "matk", actor.Matk, context) + skill.Power);
+                healAmount = ApplyVariance(battle, healAmount, skill.DamageVariancePercent);
+                int maxHp = GetEffectiveStat(gameState, target, "maxhp", target.MaxHp, context);
+                int previous = target.Hp;
+                int next = Math.Min(maxHp, previous + healAmount);
+                target.Hp = next;
+                context.EventSink.Publish(new BattleActionResolvedEvent(
+                    battle.BattleId,
+                    actor.ActorId,
+                    skill.Id,
+                    target.ActorId,
+                    next - previous,
+                    wasHeal: true));
+                break;
+            }
+
             case BattleSkillEffectType.PhysicalDamage:
-                damage = ResolveTypedDamage(
-                    gameState, actor, target, skill, context,
-                    damageTypeId: skill.DamageTypeId ?? StandardDamageTypes.Physical,
-                    legacyAttackStatId: "atk", legacyAttackScalar: actor.Atk,
-                    legacyDefenseStatId: "def", legacyDefenseScalar: target.Def);
-                break;
             case BattleSkillEffectType.MagicalDamage:
-                damage = ResolveTypedDamage(
-                    gameState, actor, target, skill, context,
-                    damageTypeId: skill.DamageTypeId ?? StandardDamageTypes.Magical,
-                    legacyAttackStatId: "matk", legacyAttackScalar: actor.Matk,
-                    legacyDefenseStatId: "mdef", legacyDefenseScalar: target.Mdef);
+            {
+                int damage;
+                if (skill.EffectType == BattleSkillEffectType.PhysicalDamage)
+                {
+                    damage = ResolveTypedDamage(
+                        gameState, actor, target, skill, context,
+                        damageTypeId: skill.DamageTypeId ?? StandardDamageTypes.Physical,
+                        legacyAttackStatId: "atk", legacyAttackScalar: actor.Atk,
+                        legacyDefenseStatId: "def", legacyDefenseScalar: target.Def);
+                }
+                else
+                {
+                    damage = ResolveTypedDamage(
+                        gameState, actor, target, skill, context,
+                        damageTypeId: skill.DamageTypeId ?? StandardDamageTypes.Magical,
+                        legacyAttackStatId: "matk", legacyAttackScalar: actor.Matk,
+                        legacyDefenseStatId: "mdef", legacyDefenseScalar: target.Mdef);
+                }
+
+                if (damage > 0)
+                {
+                    damage = ApplyVariance(battle, damage, skill.DamageVariancePercent);
+                    if (damage < 1)
+                    {
+                        damage = 1;
+                    }
+                }
+
+                int previousHp = target.Hp;
+                target.Hp = Math.Max(0, target.Hp - damage);
+                context.EventSink.Publish(new BattleActionResolvedEvent(
+                    battle.BattleId,
+                    actor.ActorId,
+                    skill.Id,
+                    target.ActorId,
+                    damage,
+                    wasHeal: false));
+
+                if (previousHp > 0 && target.Hp == 0)
+                {
+                    context.EventSink.Publish(new QuestSignalEvent(QuestSignalType.Kill, target.ActorId, 1));
+                }
+
                 break;
-            default:
-                return DomainResult.Fail(new DomainError(
-                    DomainErrorCode.UnsupportedOperation,
-                    $"Unsupported skill effect '{skill.EffectType}'."));
-        }
+            }
 
-        int previousHp = target.Hp;
-        target.Hp = Math.Max(0, target.Hp - damage);
-        context.EventSink.Publish(new BattleActionResolvedEvent(
-            battle.BattleId,
-            actorId,
-            skillId,
-            targetActorId,
-            damage,
-            wasHeal: false));
-
-        if (previousHp > 0 && target.Hp == 0)
-        {
-            context.EventSink.Publish(new QuestSignalEvent(QuestSignalType.Kill, target.ActorId, 1));
+            case BattleSkillEffectType.Buff:
+            case BattleSkillEffectType.Debuff:
+                // No HP change; statuses applied below carry the effect.
+                break;
         }
 
         ApplyStatusApplicationsAfterSkill(gameState, battle, actor, target, skill, context);
-        ConsumeSkillCosts(actor, skill);
-        return DomainResult.Success();
+    }
+
+    private static int ApplyVariance(BattleState battle, int baseAmount, int variancePercent)
+    {
+        if (variancePercent <= 0 || baseAmount == 0)
+        {
+            return baseAmount;
+        }
+
+        int range = (variancePercent * 2) + 1;
+        int offset = battle.RngState.NextInt(range) - variancePercent;
+        int multiplier = 100 + offset;
+        double scaled = (baseAmount * multiplier) / 100.0;
+        return (int)Math.Round(scaled, MidpointRounding.AwayFromZero);
     }
 
     private static int GetEffectiveStat(GameState gameState, BattleActorState actor, string statKey, int baseValue, CommandContext context)
@@ -596,9 +741,15 @@ internal sealed class BattleRuntime
         switch (skill.EffectType)
         {
             case BattleSkillEffectType.Heal:
+                // Single-target heal: must not be at full HP. AoE heal: pre-filter
+                // skips full-HP allies silently so the cast still succeeds for everyone else.
                 return sameFaction && target.Hp < target.MaxHp;
             case BattleSkillEffectType.PhysicalDamage:
             case BattleSkillEffectType.MagicalDamage:
+                return !sameFaction && !target.IsDowned;
+            case BattleSkillEffectType.Buff:
+                return sameFaction && !target.IsDowned;
+            case BattleSkillEffectType.Debuff:
                 return !sameFaction && !target.IsDowned;
             default:
                 return false;
