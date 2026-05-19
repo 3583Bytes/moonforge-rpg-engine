@@ -700,10 +700,10 @@ internal static class EncounterGenerator
             ["enemy.template.catacombs.cult_acolyte"] =
                 new EnemyTemplate("Cult Acolyte", BaseHp: 13, HpPerDepth: 2, BaseAtk: 3, AtkPerDepth: 1, BaseDef: 1, BaseInitiative: 12, UsesMagic: true, IsSupport: true),
             ["enemy.template.inferno.ember_imp"] =
-                new EnemyTemplate("Ember Imp", BaseHp: 16, HpPerDepth: 3, BaseAtk: 6, AtkPerDepth: 1, BaseDef: 2, BaseInitiative: 14, UsesMagic: true,
+                new EnemyTemplate("Ember Imp", BaseHp: 16, HpPerDepth: 2, BaseAtk: 6, AtkPerDepth: 1, BaseDef: 2, BaseInitiative: 14, UsesMagic: true,
                     Resistances: new Dictionary<string, int> { ["res.fire"] = 75, ["res.ice"] = -25 }),
             ["enemy.template.inferno.hell_hound"] =
-                new EnemyTemplate("Hell Hound", BaseHp: 18, HpPerDepth: 3, BaseAtk: 7, AtkPerDepth: 1, BaseDef: 2, BaseInitiative: 16, UsesMagic: false,
+                new EnemyTemplate("Hell Hound", BaseHp: 18, HpPerDepth: 2, BaseAtk: 7, AtkPerDepth: 1, BaseDef: 2, BaseInitiative: 16, UsesMagic: false,
                     Resistances: new Dictionary<string, int> { ["res.fire"] = 50, ["res.ice"] = -25 })
         };
 

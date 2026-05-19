@@ -17,11 +17,16 @@ UseBattleSkillCommand    (player turn)
 ExecuteAiTurnCommand     (enemy turn — controlled by AI policy)
    └── same shape as UseBattleSkillCommand, target chosen by AiTargetPolicy
 
-… (repeat until victory/defeat) …
+… each round wrap: TurnOrder is re-sorted by current effective initiative …
 
 BattleEndedEvent
    └── Rewards (gold/items/loot table) granted atomically
 ```
+
+`TurnOrder` is set at battle start by Initiative descending (tiebreak: ascending actor
+id), then **re-sorted at every round wrap** using each actor's current effective
+`initiative` stat — so equipment, status effects (Slow, Quicken), and any other modifier
+that touches the `initiative` stat all shift turn order between rounds.
 
 `GameState.ActiveBattle` is non-null while a battle is in progress. Save during a battle
 is unsupported by design — take snapshots between battles.

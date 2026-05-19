@@ -1064,6 +1064,10 @@ internal sealed class BattleRuntime
             battle.TurnIndex++;
             if (battle.TurnIndex >= battle.TurnOrder.Count)
             {
+                // Pokemon-style: re-sort by current effective initiative so equipment,
+                // status effects, and stat-block modifiers shift turn order between
+                // rounds (e.g. a Slow status drops the affected actor's slot).
+                RecomputeTurnOrder(gameState, battle, context);
                 battle.TurnIndex = 0;
                 battle.Round++;
             }
@@ -1108,6 +1112,20 @@ internal sealed class BattleRuntime
             }
 
             return;
+        }
+    }
+
+    private static void RecomputeTurnOrder(GameState gameState, BattleState battle, CommandContext context)
+    {
+        List<BattleActorState> ordered = battle.Actors.Values
+            .OrderByDescending(x => GetEffectiveStatSigned(gameState, x, "initiative", x.Initiative, context))
+            .ThenBy(x => x.ActorId, StringComparer.Ordinal)
+            .ToList();
+
+        battle.TurnOrder.Clear();
+        foreach (BattleActorState actor in ordered)
+        {
+            battle.TurnOrder.Add(actor.ActorId);
         }
     }
 
