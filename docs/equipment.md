@@ -89,6 +89,43 @@ IReadOnlyDictionary<string, int> totalBonuses = new GetEquipmentBonusesQueryHand
 // totalBonuses["atk"] == 4 (sum across all equipped slots)
 ```
 
+## Granted skills
+
+Equipment can also grant skills while equipped — a magic wand that teaches `skill.bolt`,
+a thief's dagger that adds `skill.backstab`. Declare them on the definition:
+
+```csharp
+definitions.AddEquipment(new EquipmentDefinition(
+    itemId: "item.gear.oak_wand",
+    slotId: "slot.weapon",
+    statBonuses: new Dictionary<string, int> { [StandardEquipmentStats.MagicAttack] = 2 },
+    displayName: "Oak Wand",
+    grantedSkillIds: ["skill.bolt"]));
+```
+
+The engine does **not** auto-merge these into a battle actor — host code reads them when
+building the actor for `StartBattleCommand`:
+
+```csharp
+IReadOnlyList<string> granted = new GetEquipmentGrantedSkillsQueryHandler(definitions)
+    .Query(gameState, new GetEquipmentGrantedSkillsQuery());
+
+List<string> heroSkills = ["skill.attack", "skill.potion"];
+foreach (string id in granted)
+{
+    if (!heroSkills.Contains(id)) heroSkills.Add(id);
+}
+
+new BattleActorDefinition(/* ... */, skillIds: heroSkills, /* ... */);
+```
+
+Make sure each granted skill id is also present in the `StartBattleCommand`'s skill list
+— the actor referencing a skill that isn't in the battle's catalog will fail with
+`Skill not found` when the player tries to use it.
+
+The query returns a deduplicated union across all equipped items, so two pieces of gear
+granting the same skill don't double-list.
+
 ## How equipment integrates with stats
 
 The bonuses don't live on `EquipmentState` — they live on the actor's `StatBlock` as

@@ -207,7 +207,7 @@ internal sealed class RoguelikeGame
     private static readonly GearMetadata[] GearCatalog =
     [
         new GearMetadata(ItemBronzeBlade, "Bronze Blade", SlotWeapon,    Atk: 2, Def: 0, Matk: 0, Mdef: 0, Initiative: 0),
-        new GearMetadata(ItemOakWand,     "Oak Wand",    SlotWeapon,    Atk: 0, Def: 0, Matk: 2, Mdef: 0, Initiative: 0),
+        new GearMetadata(ItemOakWand,     "Oak Wand",    SlotWeapon,    Atk: 0, Def: 0, Matk: 2, Mdef: 0, Initiative: 0, GrantedSkillIds: ["skill.bolt"]),
         new GearMetadata(ItemLeatherVest, "Leather Vest", SlotArmor,    Atk: 0, Def: 2, Matk: 0, Mdef: 0, Initiative: 0),
         new GearMetadata(ItemMysticRobe,  "Mystic Robe", SlotArmor,     Atk: 0, Def: 0, Matk: 1, Mdef: 2, Initiative: 0),
         new GearMetadata(ItemIronRing,    "Iron Ring",   SlotAccessory, Atk: 1, Def: 1, Matk: 0, Mdef: 0, Initiative: 0),
@@ -3015,6 +3015,18 @@ internal sealed class RoguelikeGame
             skillIds.Add(abilities[i].SkillId);
         }
 
+        // Equipment-granted skills come last so the basic attack stays in slot 0. Dedupe
+        // because a granted skill might already be a class ability.
+        IReadOnlyList<string> grantedSkills = new GetEquipmentGrantedSkillsQueryHandler(_definitions)
+            .Query(_gameState, new GetEquipmentGrantedSkillsQuery());
+        for (int i = 0; i < grantedSkills.Count; i++)
+        {
+            if (!skillIds.Contains(grantedSkills[i]))
+            {
+                skillIds.Add(grantedSkills[i]);
+            }
+        }
+
         Dictionary<string, int> focusMaxes = new(StringComparer.Ordinal) { [FocusResourceId] = MaxFocus };
         Dictionary<string, int> focusRefresh = new(StringComparer.Ordinal) { [FocusResourceId] = 1 };
         return new BattleActorDefinition(
@@ -3772,7 +3784,8 @@ internal sealed class RoguelikeGame
         int Def,
         int Matk,
         int Mdef,
-        int Initiative)
+        int Initiative,
+        IReadOnlyList<string>? GrantedSkillIds = null)
     {
         public EquipmentDefinition ToEquipmentDefinition()
         {
@@ -3782,7 +3795,12 @@ internal sealed class RoguelikeGame
             if (Matk != 0) bonuses[StandardEquipmentStats.MagicAttack] = Matk;
             if (Mdef != 0) bonuses[StandardEquipmentStats.MagicDefense] = Mdef;
             if (Initiative != 0) bonuses[StandardEquipmentStats.Initiative] = Initiative;
-            return new EquipmentDefinition(ItemId, SlotId, bonuses, displayName: Name);
+            return new EquipmentDefinition(
+                ItemId,
+                SlotId,
+                bonuses,
+                displayName: Name,
+                grantedSkillIds: GrantedSkillIds);
         }
     }
 
